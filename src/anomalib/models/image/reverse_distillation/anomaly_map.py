@@ -79,6 +79,12 @@ class AnomalyMapGenerator(nn.Module):
             raise ValueError(msg)
         self.mode = mode
 
+        # Optimization: Allocate GaussianBlur2d once with fixed parameters.
+        self.gaussian_blur = GaussianBlur2d(
+            kernel_size=(self.kernel_size, self.kernel_size),
+            sigma=(self.sigma, self.sigma),
+        )
+
     def forward(self, student_features: list[torch.Tensor], teacher_features: list[torch.Tensor]) -> torch.Tensor:
         """Compute anomaly map given encoder and decoder features.
 
@@ -89,29 +95,28 @@ class AnomalyMapGenerator(nn.Module):
         Returns:
             Tensor: Anomaly maps of length batch.
         """
+        batch_size = student_features[0].shape[0]
+        device = student_features[0].device
+
         if self.mode == AnomalyMapGenerationMode.MULTIPLY:
-            anomaly_map = torch.ones(
-                [student_features[0].shape[0], 1, *self.image_size],
-                device=student_features[0].device,
-            )  # b c h w
-        elif self.mode == AnomalyMapGenerationMode.ADD:
-            anomaly_map = torch.zeros(
-                [student_features[0].shape[0], 1, *self.image_size],
-                device=student_features[0].device,
-            )
+            anomaly_map = torch.ones((batch_size, 1, *self.image_size), device=device)
 
-        for student_feature, teacher_feature in zip(student_features, teacher_features, strict=True):
-            distance_map = 1 - F.cosine_similarity(student_feature, teacher_feature)
-            distance_map = torch.unsqueeze(distance_map, dim=1)
+            def op(acc, dist):
+                return acc * dist
+
+        else:  # self.mode == AnomalyMapGenerationMode.ADD
+            anomaly_map = torch.zeros((batch_size, 1, *self.image_size), device=device)
+
+            def op(acc, dist):
+                return acc + dist
+
+        for s_feat, t_feat in zip(student_features, teacher_features, strict=True):
+            distance_map = 1 - F.cosine_similarity(s_feat, t_feat)
+            distance_map = distance_map.unsqueeze(1)
             distance_map = F.interpolate(distance_map, size=self.image_size, mode="bilinear", align_corners=True)
-            if self.mode == AnomalyMapGenerationMode.MULTIPLY:
-                anomaly_map *= distance_map
-            elif self.mode == AnomalyMapGenerationMode.ADD:
-                anomaly_map += distance_map
+            anomaly_map = op(anomaly_map, distance_map)
 
-        gaussian_blur = GaussianBlur2d(
-            kernel_size=(self.kernel_size, self.kernel_size),
-            sigma=(self.sigma, self.sigma),
-        ).to(student_features[0].device)
-
+        # Optimization: Move GaussianBlur2d to correct device beforehand
+        # and avoid repeated instantiation.
+        gaussian_blur = self.gaussian_blur.to(anomaly_map.device)
         return gaussian_blur(anomaly_map)
