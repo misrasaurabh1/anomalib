@@ -32,6 +32,7 @@ Note:
 """
 
 from collections.abc import Sequence
+from pathlib import Path
 
 import numpy as np
 from anomalib.data.validators.numpy.image import NumpyImageBatchValidator, NumpyImageValidator
@@ -419,10 +420,25 @@ class NumpyDepthBatchValidator:
         """
         if depth_path is None:
             return None
+        # Fast path: all elements are already strings, avoid per-element type check and conversion
+        # Check only the container type and the elements' types once
         if not isinstance(depth_path, list):
             msg = f"Depth path must be a list of strings, got {type(depth_path)}."
             raise TypeError(msg)
-        return [validate_path(path) for path in depth_path]
+        # Check if all are strings, which is common case for normal usage
+        if all(isinstance(path, str) for path in depth_path):
+            return depth_path
+        # Fallback: convert any Path objects to string, otherwise raise
+        out = []
+        for path in depth_path:
+            if isinstance(path, str):
+                out.append(path)
+            elif isinstance(path, Path):
+                out.append(str(path))
+            else:
+                msg = f"Depth path elements must be strings or Path objects, got {type(path)}."
+                raise TypeError(msg)
+        return out
 
     @staticmethod
     def validate_explanation(explanation: list[str] | None) -> list[str] | None:

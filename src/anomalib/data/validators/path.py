@@ -37,6 +37,39 @@ Note:
 from collections.abc import Sequence
 from pathlib import Path
 
+"""Validate IO path data.
+
+This module provides validators for file system paths. The validators ensure path
+consistency and correctness.
+
+The validators check:
+    - Path types (str vs Path objects)
+    - Path string formatting
+    - Batch size consistency
+    - None handling
+
+Example:
+    Validate a single path::
+
+        >>> from anomalib.data.validators import validate_path
+        >>> path = "/path/to/file.jpg"
+        >>> validated = validate_path(path)
+        >>> validated == path
+        True
+
+    Validate a batch of paths::
+
+        >>> from anomalib.data.validators import validate_batch_path
+        >>> paths = ["/path/1.jpg", "/path/2.jpg"]
+        >>> validated = validate_batch_path(paths, batch_size=2)
+        >>> len(validated)
+        2
+
+Note:
+    The validators are used internally by the data modules to ensure path
+    consistency before processing.
+"""
+
 
 def validate_path(path: str | Path) -> str:
     """Validate a single input path.
