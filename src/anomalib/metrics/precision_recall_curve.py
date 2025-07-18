@@ -73,12 +73,17 @@ class BinaryPrecisionRecallCurve(_BinaryPrecisionRecallCurve):
                 - Flattened targets
                 - Adjusted thresholds
         """
-        preds = preds.flatten()
-        target = target.flatten()
+        # Check if tensors are already 1D and contiguous; avoid unnecessary copying
+        if preds.dim() != 1 or not preds.is_contiguous():
+            preds = preds.flatten()
+        if target.dim() != 1 or not target.is_contiguous():
+            target = target.flatten()
+
         if ignore_index is not None:
-            idx = target != ignore_index
-            preds = preds[idx]
-            target = target[idx]
+            mask = target != ignore_index
+            # Use masked_select for efficient filtering
+            preds = preds.masked_select(mask)
+            target = target.masked_select(mask)
 
         thresholds = _adjust_threshold_arg(thresholds, preds.device)
         return preds, target, thresholds
