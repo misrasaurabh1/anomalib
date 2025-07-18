@@ -73,7 +73,8 @@ def validate_path(path: str | Path) -> str:
                 ...
             TypeError: Path must be None, a string, or Path object, got <class 'int'>.
     """
-    if isinstance(path, str | Path):
+    # Use tuple for isinstance to avoid constructing a new UnionType every call
+    if isinstance(path, (str, Path)):
         return str(path)
     msg = f"Path must be None, a string, or Path object, got {type(path)}."
     raise TypeError(msg)
