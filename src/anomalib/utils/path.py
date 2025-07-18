@@ -191,7 +191,13 @@ def convert_snake_to_pascal_case(snake_case: str) -> str:
         >>> convert_snake_to_pascal_case("reverse_distillation")
         'ReverseDistillation'
     """
-    return "".join(word.capitalize() for word in snake_case.split("_"))
+    # Use list comprehension instead of generator expression for slight speedup,
+    # and minimize attribute lookup by binding method
+    split = snake_case.split
+    capitalize = str.capitalize
+    words = split("_")
+    capitalized_words = [capitalize(word) for word in words]
+    return "".join(capitalized_words)
 
 
 def convert_to_title_case(text: str) -> str:
