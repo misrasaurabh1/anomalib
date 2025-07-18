@@ -351,20 +351,26 @@ class ParallelGlowCouplingLayer(InvertibleModule):
     """
 
     def __init__(self, dims_in: list[tuple[int]], subnet_args: dict, clamp: float = 5.0) -> None:
+        # Use local variables intensively to minimize attribute creation until necessary.
         super().__init__(dims_in)
         channels = dims_in[0][0]
+
+        split_len1 = channels >> 1  # channels // 2 (faster than division, for int)
+        split_len2 = channels - split_len1
+
+        # Assign only essential properties to self
         self.ndims = len(dims_in[0])
-
-        self.split_len1 = channels // 2
-        self.split_len2 = channels - channels // 2
-
+        self.split_len1 = split_len1
+        self.split_len2 = split_len2
         self.clamp = clamp
 
-        self.max_s = exp(clamp)
-        self.min_s = exp(-clamp)
+        exp_clamp = exp(clamp)
+        self.max_s = exp_clamp
+        self.min_s = 1.0 / exp_clamp
 
-        self.cross_convolution1 = CrossConvolutions(self.split_len1, self.split_len2 * 2, **subnet_args)
-        self.cross_convolution2 = CrossConvolutions(self.split_len2, self.split_len1 * 2, **subnet_args)
+        # Build cross convolutions, passing split lens directly
+        self.cross_convolution1 = CrossConvolutions(split_len1, split_len2 * 2, **subnet_args)
+        self.cross_convolution2 = CrossConvolutions(split_len2, split_len1 * 2, **subnet_args)
 
     def exp(self, input_tensor: torch.Tensor) -> torch.Tensor:
         """Exponentiates input with optional clamping.
