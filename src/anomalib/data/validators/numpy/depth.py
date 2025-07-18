@@ -393,16 +393,25 @@ class NumpyDepthBatchValidator:
         """
         if depth_map is None:
             return None
-        if not isinstance(depth_map, np.ndarray):
-            msg = f"Depth map batch must be a numpy array, got {type(depth_map)}."
-            raise TypeError(msg)
-        if depth_map.ndim not in {3, 4}:
-            msg = f"Depth map batch must have shape [N, H, W] or [N, H, W, 1], got shape {depth_map.shape}."
-            raise ValueError(msg)
-        if depth_map.ndim == 4 and depth_map.shape[3] != 1:
-            msg = f"Depth map batch with 4 dimensions must have 1 channel, got {depth_map.shape[3]}."
-            raise ValueError(msg)
-        return depth_map.astype(np.float32)
+
+        # Fastest type check first, to avoid formatting when unnecessary.
+        if type(depth_map) is not np.ndarray:
+            raise TypeError(f"Depth map batch must be a numpy array, got {type(depth_map)}.")
+
+        ndim = depth_map.ndim
+        if ndim == 3:
+            pass
+        elif ndim == 4:
+            if depth_map.shape[3] != 1:
+                raise ValueError(
+                    f"Depth map batch with 4 dimensions must have 1 channel, got {depth_map.shape[3]}.",
+                )
+        else:
+            raise ValueError(
+                f"Depth map batch must have shape [N, H, W] or [N, H, W, 1], got shape {depth_map.shape}.",
+            )
+        # Avoid unnecessary copy if already float32
+        return depth_map.astype(np.float32, copy=False)
 
     @staticmethod
     def validate_depth_path(depth_path: list[str] | None) -> list[str] | None:
