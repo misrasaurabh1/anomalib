@@ -260,14 +260,16 @@ class ParallelPermute(InvertibleModule):
         self.in_channels = [dims_in[i][0] for i in range(self.n_inputs)]
         self.seed = seed
 
-        perm, perm_inv = self.get_random_perm(0)
-        self.perm = [perm]  # stores the random order of channels
-        self.perm_inv = [perm_inv]  # stores the inverse mapping to recover the original order of channels
+        # Optimize: Generate all permutations at once using vectorized NumPy ops
+        rng = np.random.default_rng(seed)
+        perms_np = [rng.permutation(ch) for ch in self.in_channels]
 
-        for i in range(1, self.n_inputs):
-            perm, perm_inv = self.get_random_perm(i)
-            self.perm.append(perm)
-            self.perm_inv.append(perm_inv)
+        # Compute inverse permutations more efficiently
+        perms_inv = [np.argsort(perm) for perm in perms_np]
+
+        # Convert to torch tensors directly, which is faster for large batches
+        self.perm = [torch.LongTensor(perm) for perm in perms_np]
+        self.perm_inv = [torch.LongTensor(perm_inv) for perm_inv in perms_inv]
 
     def get_random_perm(self, index: int) -> tuple[torch.Tensor, torch.Tensor]:
         """Generate random permutation and its inverse for given input index.
