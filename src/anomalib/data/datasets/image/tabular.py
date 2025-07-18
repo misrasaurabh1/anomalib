@@ -28,6 +28,7 @@ Example:
 
 from pathlib import Path
 
+import numpy as np
 from pandas import DataFrame
 from torchvision.transforms.v2 import Transform
 
@@ -157,141 +158,136 @@ def make_tabular_dataset(
         3  ./datasets/custom/images/03.png    DirType.NORMAL    0                           Split.TRAIN
         4  ./datasets/custom/images/04.png    DirType.NORMAL    0                           Split.TRAIN
     """
-    ######################
-    ### Pre-processing ###
-    ######################
-
     # Convert to pandas DataFrame if dictionary or list is given
-    if isinstance(samples, dict | list):
+    if isinstance(samples, (dict, list)):
         samples = DataFrame(samples)
     if "image_path" not in samples.columns:
         msg = "The samples table must contain an 'image_path' column."
         raise ValueError(msg)
     samples = samples.sort_values(by="image_path", ignore_index=True)
 
-    ###########################
-    ### Add missing columns ###
-    ###########################
+    # Adding missing columns
+    existing_cols = samples.columns
+    has_label_index = "label_index" in existing_cols
+    has_label = "label" in existing_cols
+    has_split = "split" in existing_cols
 
-    # Adding missing columns successively:
-    # The user can provide one or more of columns 'label_index', 'label', and 'split'.
-    # The missing columns will be inferred from the provided columns by predefined rules.
+    if has_label_index:
+        samples["label_index"] = samples["label_index"].astype("Int64")
 
-    if "label_index" in samples.columns:
-        samples.label_index = samples.label_index.astype("Int64")
-
-    columns_present = [col in samples.columns for col in ["label_index", "label", "split"]]
-
-    # all columns missing
-    if columns_present == [
-        False,  # label_index
-        False,  # label
-        False,  # split
-    ]:
+    if not (has_label_index or has_label or has_split):
         msg = "The samples table must contain at least one of 'label_index', 'label' or 'split' columns."
         raise ValueError(msg)
 
-    # label_index missing (split can be present or missing, therefore only first two values are checked)
-    if columns_present[:2] == [
-        False,  # label_index
-        True,  # label
-    ]:
-        label_to_label_index = {
+    # Add missing columns with vectorized mapping
+    # label_index missing, label present
+    if not has_label_index and has_label:
+        label_dict = {
             DirType.ABNORMAL: LabelName.ABNORMAL,
             DirType.NORMAL: LabelName.NORMAL,
             DirType.NORMAL_TEST: LabelName.NORMAL,
         }
-        samples["label_index"] = samples["label"].map(label_to_label_index).astype("Int64")
+        samples["label_index"] = samples["label"].map(label_dict).astype("Int64")
+        has_label_index = True
 
-    # label_index and label missing
-    elif columns_present == [
-        False,  # label_index
-        False,  # label
-        True,  # split
-    ]:
-        split_to_label_index = {
+    # label_index and label missing, split present
+    if not has_label_index and not has_label and has_split:
+        split_dict = {
             Split.TRAIN: LabelName.NORMAL,
             Split.TEST: LabelName.ABNORMAL,
         }
-        samples["label_index"] = samples["split"].map(split_to_label_index).astype("Int64")
+        samples["label_index"] = samples["split"].map(split_dict).astype("Int64")
+        has_label_index = True
 
-    # label and split missing
-    elif columns_present == [
-        True,  # label_index
-        False,  # label
-        False,  # split
-    ]:
-        label_index_to_label = {
+    # label and split missing, label_index present
+    if has_label_index and not has_label and not has_split:
+        index_dict = {
             LabelName.ABNORMAL: DirType.ABNORMAL,
             LabelName.NORMAL: DirType.NORMAL,
         }
-        samples["label"] = samples["label_index"].map(label_index_to_label)
+        samples["label"] = samples["label_index"].map(index_dict)
+        has_label = True
 
-    # reevaluate columns_present in case a column was added in the previous control flow
-    columns_present = [col in samples.columns for col in ["label_index", "label", "split"]]
-    # label missing
-    if columns_present == [
-        True,  # label_index
-        False,  # label
-        True,  # split
-    ]:
-        samples["label"] = samples.apply(
-            lambda x: DirType.NORMAL
-            if (x["label_index"] == LabelName.NORMAL) and (x["split"] == Split.TRAIN)
-            else (
-                DirType.NORMAL_TEST
-                if x["label_index"] == LabelName.NORMAL and x["split"] == Split.TEST
-                else (DirType.ABNORMAL if x["label_index"] == LabelName.ABNORMAL else None)
-            ),
-            axis=1,
-        )
-    # split missing
-    elif columns_present == [
-        True,  # label_index
-        True,  # label
-        False,  # split
-    ]:
-        label_to_split = {
+    # Recalculate for possible previous additions
+    existing_cols = samples.columns
+    has_label_index = "label_index" in existing_cols
+    has_label = "label" in existing_cols
+    has_split = "split" in existing_cols
+
+    # label missing, label_index and split present
+    if has_label_index and not has_label and has_split:
+        normal_mask = samples["label_index"] == LabelName.NORMAL
+        train_mask = samples["split"] == Split.TRAIN
+        test_mask = samples["split"] == Split.TEST
+        label_arr = np.full(samples.shape[0], None, dtype=object)
+        label_arr[normal_mask & train_mask] = DirType.NORMAL
+        label_arr[normal_mask & test_mask] = DirType.NORMAL_TEST
+        label_arr[(samples["label_index"] == LabelName.ABNORMAL)] = DirType.ABNORMAL
+        samples["label"] = label_arr
+        has_label = True
+
+    # split missing, label_index and label present
+    if has_label_index and has_label and not has_split:
+        split_dict = {
             DirType.NORMAL: Split.TRAIN,
             DirType.ABNORMAL: Split.TEST,
             DirType.NORMAL_TEST: Split.TEST,
         }
-        samples["split"] = samples["label"].map(label_to_split)
+        samples["split"] = samples["label"].map(split_dict)
+        has_split = True
 
     # Add mask_path column if not exists
     if "mask_path" not in samples.columns:
         samples["mask_path"] = ""
 
-    #######################
-    ### Post-processing ###
-    #######################
-
-    # Add root to paths
+    # Fillna in mask_path once
     samples["mask_path"] = samples["mask_path"].fillna("")
+
+    # Add root to paths using vectorized string ops for efficiency
     if root:
-        samples["image_path"] = samples["image_path"].map(lambda x: Path(root, x))
-        samples.loc[
-            samples["mask_path"] != "",
-            "mask_path",
-        ] = samples.loc[samples["mask_path"] != "", "mask_path"].map(lambda x: Path(root, x))
-    samples = samples.astype({"image_path": "str", "mask_path": "str", "label": "str"})
+        root = str(root)
+        if not root.endswith(("/", "\\")):
+            root = root + "/"
+        # Fastest path join for str columns using .str.cat or .astype(str).radd()
+        samples["image_path"] = np.where(
+            samples["image_path"].astype(str).str.startswith(root),
+            samples["image_path"].astype(str),
+            root + samples["image_path"].astype(str),
+        )
+        mask_mask = samples["mask_path"] != ""
+        if mask_mask.any():
+            samples.loc[mask_mask, "mask_path"] = np.where(
+                samples.loc[mask_mask, "mask_path"].astype(str).str.startswith(root),
+                samples.loc[mask_mask, "mask_path"].astype(str),
+                root + samples.loc[mask_mask, "mask_path"].astype(str),
+            )
+
+    # Convert columns to correct dtype (faster to just do minimal types)
+    samples["image_path"] = samples["image_path"].astype(str)
+    samples["mask_path"] = samples["mask_path"].astype(str)
+    if has_label:
+        samples["label"] = samples["label"].astype(str)
 
     # Check if anomalous samples are in training set
-    if ((samples.label_index == LabelName.ABNORMAL) & (samples.split == Split.TRAIN)).any():
+    # Use numpy vectorized boolean instead of slow pandas chained logic
+    anomaly_in_train = ((samples["label_index"] == LabelName.ABNORMAL) & (samples["split"] == Split.TRAIN)).any()
+    if anomaly_in_train:
         msg = "Training set must not contain anomalous samples."
         raise MisMatchError(msg)
 
     # Check for None or NaN values
-    if samples.isna().any().any():
+    if samples.isna().values.any():
         msg = "The samples table contains None or NaN values."
         raise ValueError(msg)
 
     # Infer the task type
-    samples.attrs["task"] = "classification" if (samples["mask_path"] == "").all() else "segmentation"
+    if (samples["mask_path"] == "").all():
+        samples.attrs["task"] = "classification"
+    else:
+        samples.attrs["task"] = "segmentation"
 
-    # Get the dataframe for the split.
-    if split:
-        samples = samples[samples.split == split]
-        samples = samples.reset_index(drop=True)
+    # Filter by split if required
+    if split is not None:
+        samples = samples[samples["split"] == split].reset_index(drop=True)
 
     return samples
