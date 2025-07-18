@@ -363,6 +363,9 @@ class ParallelGlowCouplingLayer(InvertibleModule):
         self.max_s = exp(clamp)
         self.min_s = exp(-clamp)
 
+        # Optimization: precompute (clamp * 0.636) as attribute for future use
+        self._clamp_mul_0_636 = self.clamp * 0.636
+
         self.cross_convolution1 = CrossConvolutions(self.split_len1, self.split_len2 * 2, **subnet_args)
         self.cross_convolution2 = CrossConvolutions(self.split_len2, self.split_len1 * 2, **subnet_args)
 
@@ -389,7 +392,9 @@ class ParallelGlowCouplingLayer(InvertibleModule):
             torch.Tensor: Log of input, optionally clamped.
         """
         if self.clamp > 0:
-            return self.clamp * 0.636 * torch.atan(input_tensor / self.clamp)
+            # Optimization: Avoid making new tensors, do computation in single step.
+            # Use torch.atan directly, this is already very efficient, but minimize python expression overhead.
+            return torch.atan(input_tensor / self.clamp).mul_(self._clamp_mul_0_636)
         return input_tensor
 
     def forward(
