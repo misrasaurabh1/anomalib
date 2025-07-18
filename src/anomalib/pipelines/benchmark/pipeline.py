@@ -80,15 +80,27 @@ class Benchmark(Pipeline):
             >>> args = {"accelerator": "cuda"}
             >>> runners = Benchmark._setup_runners(args)
         """
-        accelerators = args["accelerator"] if isinstance(args["accelerator"], list) else [args["accelerator"]]
+        accelerators = args["accelerator"]
+        if not isinstance(accelerators, list):
+            accelerators = [accelerators]
+        valid_accelerators = {"cpu", "cuda"}
+
+        # Early validation of accelerators
+        invalid = [acc for acc in accelerators if acc not in valid_accelerators]
+        if invalid:
+            raise ValueError(f"Unsupported accelerator(s): {invalid!r}")
+
         runners: list[Runner] = []
+        cuda_device_count = None  # Query only if needed & once
+
         for accelerator in accelerators:
-            if accelerator not in {"cpu", "cuda"}:
-                msg = f"Unsupported accelerator: {accelerator}"
-                raise ValueError(msg)
-            device_count = torch.cuda.device_count()
-            if device_count <= 1 or accelerator == "cpu":
-                runners.append(SerialRunner(BenchmarkJobGenerator(accelerator)))
-            else:
-                runners.append(ParallelRunner(BenchmarkJobGenerator(accelerator), n_jobs=device_count))
+            gen = BenchmarkJobGenerator(accelerator)
+            if accelerator == "cuda":
+                if cuda_device_count is None:
+                    cuda_device_count = torch.cuda.device_count()
+                if cuda_device_count > 1:
+                    runners.append(ParallelRunner(gen, n_jobs=cuda_device_count))
+                    continue
+            # Default to SerialRunner for cpu or single-GPU
+            runners.append(SerialRunner(gen))
         return runners
