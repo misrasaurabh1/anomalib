@@ -158,17 +158,20 @@ def convert_to_snake_case(s: str) -> str:
         - Multiple consecutive underscores are collapsed to a single underscore
         - Punctuation marks (``.``, ``-``, ``'``) are converted to underscores
     """
-    # Replace whitespace, hyphens, periods, and apostrophes with underscores
-    s = re.sub(r"\s+|[-.\']", "_", s)
+    # Replace whitespace, hyphens, periods, and apostrophes with underscores (faster, single pass)
+    s = RE_WS_PUNCT.sub("_", s)
 
-    # Insert underscores before capital letters (except at the beginning of the string)
-    s = re.sub(r"(?<!^)(?=[A-Z])", "_", s).lower()
+    # Insert underscores before capital letters (except at the beginning)
+    s = RE_CAMEL.sub("_", s)
 
-    # Remove leading and trailing underscores
-    s = re.sub(r"^_+|_+$", "", s)
+    # Convert to lowercase once, before further regex
+    s = s.lower()
+
+    # Remove leading/trailing underscores via strip for speed
+    s = s.strip("_")
 
     # Replace multiple consecutive underscores with a single underscore
-    return re.sub(r"__+", "_", s)
+    return RE_MULTI_UNDER.sub("_", s)
 
 
 def convert_snake_to_pascal_case(snake_case: str) -> str:
@@ -393,3 +396,10 @@ def generate_output_filename(
         final_output_path.mkdir(parents=True, exist_ok=True)
 
     return final_output_path / input_path.name
+
+
+RE_WS_PUNCT = re.compile(r"[\s\-\.']")
+
+RE_CAMEL = re.compile(r"(?<!^)(?=[A-Z])")
+
+RE_MULTI_UNDER = re.compile(r"_+")
